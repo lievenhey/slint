@@ -927,6 +927,7 @@ pub mod ffi {
     pub enum GraphicsAPI {
         /// The rendering is done using OpenGL.
         NativeOpenGL,
+        Vulkan,
     }
 
     #[allow(non_camel_case_types)]
@@ -1108,6 +1109,7 @@ pub mod ffi {
             fn notify(&mut self, state: RenderingState, graphics_api: &crate::api::GraphicsAPI) {
                 let cpp_graphics_api = match graphics_api {
                     crate::api::GraphicsAPI::NativeOpenGL { .. } => GraphicsAPI::NativeOpenGL,
+                    crate::api::GraphicsAPI::Vulkan { .. } => GraphicsAPI::Vulkan,
                     crate::api::GraphicsAPI::WebGL { .. } => unreachable!(), // We don't support wasm with C++
                 };
                 (self.callback)(state, cpp_graphics_api, self.user_data)

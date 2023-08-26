@@ -105,6 +105,11 @@ impl SkiaRenderer {
         &self,
         post_render_cb: Option<&dyn Fn(&mut dyn ItemRenderer)>,
     ) -> Result<(), i_slint_core::platform::PlatformError> {
+        let api = GraphicsAPI::Vulkan;
+        if let Some(callback) = self.rendering_notifier.borrow_mut().as_mut() {
+            callback.notify(RenderingState::RenderingSetup, &api)
+        }
+
         if self.rendering_first_time.take() {
             *self.rendering_metrics_collector.borrow_mut() =
                 RenderingMetricsCollector::new(&format!(
@@ -114,9 +119,7 @@ impl SkiaRenderer {
                 ));
 
             if let Some(callback) = self.rendering_notifier.borrow_mut().as_mut() {
-                self.surface.with_graphics_api(&mut |api| {
-                    callback.notify(RenderingState::RenderingSetup, &api)
-                })
+                callback.notify(RenderingState::RenderingSetup, &api)
             }
         }
 
@@ -141,9 +144,7 @@ impl SkiaRenderer {
                     // Skia's clear() will merely schedule a clear call, so flush right away to make it immediate.
                     gr_context.flush(None);
 
-                    self.surface.with_graphics_api(&mut |api| {
-                        callback.notify(RenderingState::BeforeRendering, &api)
-                    })
+                    callback.notify(RenderingState::BeforeRendering, &api)
                 }
 
                 let mut box_shadow_cache = Default::default();
@@ -191,9 +192,7 @@ impl SkiaRenderer {
             });
 
             if let Some(callback) = self.rendering_notifier.borrow_mut().as_mut() {
-                self.surface.with_graphics_api(&mut |api| {
-                    callback.notify(RenderingState::AfterRendering, &api)
-                })
+                callback.notify(RenderingState::AfterRendering, &api)
             }
         })
     }
@@ -403,7 +402,7 @@ pub trait Surface {
     /// Returns true if the surface supports exposing its platform specific API via the GraphicsAPI struct
     /// and the `with_graphics_api` function.
     fn supports_graphics_api(&self) -> bool {
-        false
+        true
     }
     /// If supported, this invokes the specified callback with access to the platform graphics API.
     fn with_graphics_api(&self, _callback: &mut dyn FnMut(GraphicsAPI<'_>)) {}

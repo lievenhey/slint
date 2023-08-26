@@ -16,6 +16,11 @@ use vulkano::instance::{Instance, InstanceCreateInfo, InstanceExtensions};
 use vulkano::memory::allocator::StandardMemoryAllocator;
 use vulkano::{Handle, VulkanLibrary, VulkanObject};
 
+use vulkano::instance::debug::{
+    DebugUtilsMessageSeverity, DebugUtilsMessageType, DebugUtilsMessenger,
+    DebugUtilsMessengerCreateInfo,
+};
+
 // must be nonzero
 const FRAMES_IN_FLIGHT: u8 = 3;
 
@@ -27,6 +32,9 @@ pub struct VulkanSurface {
     images: RefCell<Vec<Arc<AttachmentImage>>>,
     image_views: RefCell<Vec<Arc<ImageView<AttachmentImage>>>>,
     instance_handle: ash::vk::Instance,
+    device_handle: ash::vk::PhysicalDevice,
+    logical_device_handle: ash::vk::Device,
+    queue_handle: ash::vk::Queue,
     frame_index: RefCell<Option<usize>>,
     memory_allocator: RefCell<StandardMemoryAllocator>,
 }
@@ -49,7 +57,10 @@ impl VulkanSurface {
         let (device, mut queues) = Device::new(
             physical_device.clone(),
             DeviceCreateInfo {
-                enabled_extensions: DeviceExtensions::empty(),
+                enabled_extensions: DeviceExtensions {
+                    khr_swapchain: true,
+                    ..DeviceExtensions::empty()
+                },
                 queue_create_infos: vec![QueueCreateInfo {
                     queue_family_index,
                     ..Default::default()
@@ -58,7 +69,9 @@ impl VulkanSurface {
             },
         )
         .map_err(|dev_err| format!("Failed to create suitable logical Vulkan device: {dev_err}"))?;
+
         let queue = queues.next().ok_or_else(|| format!("Not Vulkan device queue found"))?;
+        let queue_handle = queue.handle();
 
         let instance = physical_device.instance();
         let library = instance.library();
@@ -124,6 +137,9 @@ impl VulkanSurface {
             images: RefCell::new(images),
             image_views: RefCell::new(image_views),
             instance_handle,
+            device_handle: physical_device.handle(),
+            logical_device_handle: device.handle(),
+            queue_handle,
             frame_index: RefCell::new(None),
             memory_allocator: RefCell::new(memory_allocator),
         })
@@ -136,7 +152,7 @@ impl VulkanSurface {
         output_image_views: &mut Vec<Arc<ImageView<AttachmentImage>>>,
     ) -> Result<(), i_slint_core::platform::PlatformError> {
         for _ in 0..FRAMES_IN_FLIGHT {
-            let image = AttachmentImage::new(
+            let image = AttachmentImage::sampled(
                 memory_allocator,
                 [size.width, size.height],
                 Format::B8G8R8A8_UNORM,
@@ -154,6 +170,18 @@ impl VulkanSurface {
 
     pub fn raw_vulkan_instance_handle(&self) -> u64 {
         return self.instance_handle.as_raw();
+    }
+
+    pub fn raw_vulkan_physical_device_handle(&self) -> u64 {
+        return self.device_handle.as_raw();
+    }
+
+    pub fn raw_vulkan_device_handle(&self) -> u64 {
+        self.logical_device_handle.as_raw()
+    }
+
+    pub fn raw_vulkan_queue_handle(&self) -> u64 {
+        self.queue_handle.as_raw()
     }
 
     pub fn current_raw_offscreen_vulkan_image_handle(&self) -> u64 {
@@ -183,19 +211,74 @@ impl super::Surface for VulkanSurface {
 
         let required_extensions = InstanceExtensions {
             khr_get_physical_device_properties2: true,
+            khr_wayland_surface: true,
+            khr_xcb_surface: true,
+            khr_surface: true,
+            ext_debug_utils: true,
             ..InstanceExtensions::empty()
         }
         .intersection(library.supported_extensions());
+
+        let layers = vec!["VK_LAYER_KHRONOS_validation".to_owned()];
 
         let instance = Instance::new(
             library.clone(),
             InstanceCreateInfo {
                 enabled_extensions: required_extensions,
+                enabled_layers: layers,
                 enumerate_portability: true,
                 ..Default::default()
             },
         )
         .map_err(|instance_err| format!("Error creating Vulkan instance: {instance_err}"))?;
+
+        let _debug_callback = unsafe {
+            DebugUtilsMessenger::new(
+                instance.clone(),
+                DebugUtilsMessengerCreateInfo {
+                    message_severity: DebugUtilsMessageSeverity::ERROR
+                        | DebugUtilsMessageSeverity::WARNING
+                        | DebugUtilsMessageSeverity::INFO
+                        | DebugUtilsMessageSeverity::VERBOSE,
+                    message_type: DebugUtilsMessageType::GENERAL
+                        | DebugUtilsMessageType::VALIDATION
+                        | DebugUtilsMessageType::PERFORMANCE,
+                    ..DebugUtilsMessengerCreateInfo::user_callback(Arc::new(|msg| {
+                        let severity = if msg.severity.intersects(DebugUtilsMessageSeverity::ERROR)
+                        {
+                            "error"
+                        } else if msg.severity.intersects(DebugUtilsMessageSeverity::WARNING) {
+                            "warning"
+                        } else if msg.severity.intersects(DebugUtilsMessageSeverity::INFO) {
+                            "information"
+                        } else if msg.severity.intersects(DebugUtilsMessageSeverity::VERBOSE) {
+                            "verbose"
+                        } else {
+                            panic!("no-impl");
+                        };
+
+                        let ty = if msg.ty.intersects(DebugUtilsMessageType::GENERAL) {
+                            "general"
+                        } else if msg.ty.intersects(DebugUtilsMessageType::VALIDATION) {
+                            "validation"
+                        } else if msg.ty.intersects(DebugUtilsMessageType::PERFORMANCE) {
+                            "performance"
+                        } else {
+                            panic!("no-impl");
+                        };
+
+                        println!(
+                            "{} {} {}: {}",
+                            msg.layer_prefix.unwrap_or("unknown"),
+                            ty,
+                            severity,
+                            msg.description
+                        );
+                    }))
+                },
+            )
+            .ok()
+        };
 
         let device_extensions = DeviceExtensions::empty();
         let (physical_device, queue_family_index) = instance

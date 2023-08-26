@@ -252,6 +252,7 @@ pub enum GraphicsAPI<'a> {
         /// `getContext` function on the HTML Canvas element.
         context_type: &'a str,
     },
+    Vulkan,
 }
 
 impl<'a> core::fmt::Debug for GraphicsAPI<'a> {
@@ -261,6 +262,7 @@ impl<'a> core::fmt::Debug for GraphicsAPI<'a> {
             GraphicsAPI::WebGL { context_type, .. } => {
                 write!(f, "GraphicsAPI::WebGL(context_type = {})", context_type)
             }
+            GraphicsAPI::Vulkan { .. } => write!(f, "GraphicsAPI::Vulkan"),
         }
     }
 }
